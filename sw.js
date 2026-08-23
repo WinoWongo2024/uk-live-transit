@@ -1,7 +1,7 @@
 // UK Live Transit service worker
-// Only caches the app shell. Never intercepts API calls (bustimes.org etc).
+// Only caches the app shell. Never intercepts API / map requests.
 
-const CACHE_NAME = "uk-live-transit-v3";
+const CACHE_NAME = "uk-live-transit-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -30,18 +30,28 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Never touch cross-origin requests (bustimes.org, tiles, CDNs, etc.)
-  // Let the browser handle them normally — avoids the "Load failed" error
+  // Never intercept cross-origin (bustimes.org, tiles, CDNs)
   if (url.origin !== self.location.origin) {
     return;
   }
 
-  // Only same-origin app shell: cache-first, network fallback
   event.respondWith(
     caches.match(event.request).then((cached) => {
+      // Network-first for JS/CSS so updates land quickly
+      if (event.request.url.match(/\.(js|css)$/)) {
+        return fetch(event.request)
+          .then((response) => {
+            if (response && response.ok) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            }
+            return response;
+          })
+          .catch(() => cached);
+      }
+
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        // Optionally cache successful navigations / assets
         if (response && response.ok && event.request.method === "GET") {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
