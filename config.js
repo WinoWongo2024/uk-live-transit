@@ -6,7 +6,7 @@
 
 const CONFIG = {
   TRANSPORTAPI_APP_ID: "9a81bccc",
-  TRANSPORTAPI_APP_KEY: ""
+  TRANSPORTAPI_APP_KEY: "caed75b9c5a81252f12a3aec68159d90"
 };
 
 // Optional later:
