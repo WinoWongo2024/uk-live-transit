@@ -1,4 +1,4 @@
-// UK Live Transit – map-first, First Bus style
+// UK Live Transit – powered by bustimes.org (no API key, no daily limit)
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,120 +17,107 @@ const toggleFavBtn = $("toggleFavBtn");
 
 let map, userMarker;
 let stopMarkers = [];
+let vehicleMarkers = [];
 let currentLat = null, currentLon = null;
 let currentPlaces = [];
 let selectedPlace = null;
 let moveTimer = null;
+let vehicleTimer = null;
 let isLoading = false;
 
-// ---------- Favourites (localStorage) ----------
+// ---------- Favourites ----------
 const FAV_KEY = "uk-live-transit-favs";
 
 function getFavourites() {
-  try {
-    return JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); }
+  catch { return []; }
 }
-
-function saveFavourites(list) {
-  localStorage.setItem(FAV_KEY, JSON.stringify(list));
-}
-
-function isFavourite(place) {
-  const id = placeKey(place);
-  return getFavourites().some((f) => f.id === id);
-}
-
-function placeKey(place) {
-  return place.atcocode || place.station_code || place.name + (place.latitude || "");
-}
+function saveFavourites(list) { localStorage.setItem(FAV_KEY, JSON.stringify(list)); }
+function placeKey(p) { return p.atcocode || p.id || (p.name + (p.latitude || "")); }
+function isFavourite(p) { return getFavourites().some(f => f.id === placeKey(p)); }
 
 function toggleFavourite(place) {
   const list = getFavourites();
   const id = placeKey(place);
-  const idx = list.findIndex((f) => f.id === id);
-  if (idx >= 0) {
-    list.splice(idx, 1);
-  } else {
-    list.push({
-      id,
-      name: place.name,
-      type: place.type,
-      atcocode: place.atcocode,
-      station_code: place.station_code,
-      latitude: place.latitude,
-      longitude: place.longitude,
-      accuracy: place.accuracy
-    });
-  }
+  const idx = list.findIndex(f => f.id === id);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push({
+    id, name: place.name, atcocode: place.atcocode,
+    latitude: place.latitude, longitude: place.longitude,
+    services: place.services || []
+  });
   saveFavourites(list);
   updateFavButton(place);
 }
 
 function updateFavButton(place) {
   if (!place) return;
-  toggleFavBtn.textContent = isFavourite(place) ? "★" : "☆";
-  toggleFavBtn.classList.toggle("active", isFavourite(place));
+  const fav = isFavourite(place);
+  toggleFavBtn.textContent = fav ? "★" : "☆";
+  toggleFavBtn.classList.toggle("active", fav);
 }
 
 // ---------- Map ----------
 function initMap() {
-  map = L.map("map", {
-    zoomControl: false,
-    attributionControl: false
-  }).setView([53.8, -1.5], 7); // UK centre-ish
+  map = L.map("map", { zoomControl: false, attributionControl: false })
+    .setView([53.8, -1.5], 7);
 
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 19,
-    subdomains: "abcd"
+    maxZoom: 19, subdomains: "abcd"
   }).addTo(map);
 
   L.control.zoom({ position: "bottomright" }).addTo(map);
 
-  // When user moves the map, reload nearby stops (debounced)
   map.on("moveend", () => {
     if (isLoading) return;
     clearTimeout(moveTimer);
     moveTimer = setTimeout(() => {
-      const c = map.getCenter();
-      // Only fetch if we moved a meaningful distance or zoomed
-      loadNearby(c.lat, c.lng, false);
-    }, 600);
+      loadFromMapBounds();
+      loadVehicles();
+    }, 700);
   });
 }
 
 function setUserLocation(lat, lon) {
   currentLat = lat;
   currentLon = lon;
-
   if (userMarker) map.removeLayer(userMarker);
-
   const icon = L.divIcon({
     className: "",
     html: '<div class="user-marker"></div>',
-    iconSize: [16, 16],
-    iconAnchor: [8, 8]
+    iconSize: [16, 16], iconAnchor: [8, 8]
   });
-
   userMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(map);
   map.setView([lat, lon], 15);
 }
 
+function getBoundsParams() {
+  const b = map.getBounds();
+  // Keep bbox reasonably small so the server stays happy
+  return {
+    ymin: b.getSouth().toFixed(5),
+    ymax: b.getNorth().toFixed(5),
+    xmin: b.getWest().toFixed(5),
+    xmax: b.getEast().toFixed(5)
+  };
+}
+
 function clearStopMarkers() {
-  stopMarkers.forEach((m) => map.removeLayer(m));
+  stopMarkers.forEach(m => map.removeLayer(m));
   stopMarkers = [];
+}
+
+function clearVehicleMarkers() {
+  vehicleMarkers.forEach(m => map.removeLayer(m));
+  vehicleMarkers = [];
 }
 
 function addStopMarker(place) {
   if (!place.latitude || !place.longitude) return;
-  const isTrain = isTrainPlace(place);
   const icon = L.divIcon({
     className: "",
-    html: `<div class="${isTrain ? "stop-marker-train" : "stop-marker-bus"}"></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6]
+    html: '<div class="stop-marker-bus"></div>',
+    iconSize: [12, 12], iconAnchor: [6, 6]
   });
   const m = L.marker([place.latitude, place.longitude], { icon })
     .addTo(map)
@@ -138,34 +125,43 @@ function addStopMarker(place) {
   stopMarkers.push(m);
 }
 
-// ---------- Helpers ----------
-function hasKeys() {
-  return CONFIG.TRANSPORTAPI_APP_ID && CONFIG.TRANSPORTAPI_APP_KEY;
+function addVehicleMarker(v) {
+  if (!v.coordinates || v.coordinates.length < 2) return;
+  const [lon, lat] = v.coordinates;
+  const line = v.service?.line_name || "?";
+  const dest = v.destination || "";
+  const name = v.vehicle?.name || "";
+
+  const icon = L.divIcon({
+    className: "",
+    html: `<div style="
+      background:#c026d3;color:#fff;font-size:10px;font-weight:700;
+      padding:2px 5px;border-radius:6px;border:1.5px solid #fff;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4);white-space:nowrap;
+    ">${line}</div>`,
+    iconSize: [30, 18], iconAnchor: [15, 9]
+  });
+
+  const m = L.marker([lat, lon], { icon, zIndexOffset: 500 })
+    .addTo(map)
+    .bindPopup(`<b>${line}</b> → ${dest}<br><small>${name}</small>`);
+  vehicleMarkers.push(m);
 }
 
-function apiUrl(path, params = {}) {
-  const url = new URL("https://transportapi.com/v3/uk" + path);
-  url.searchParams.set("app_id", CONFIG.TRANSPORTAPI_APP_ID);
-  url.searchParams.set("app_key", CONFIG.TRANSPORTAPI_APP_KEY);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  return url.toString();
-}
-
+// ---------- API helpers ----------
 async function fetchJson(url) {
   const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status}: ${text.slice(0, 100)}`);
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-function isTrainPlace(place) {
-  return (
-    (place.type || "").toLowerCase().includes("train") ||
-    !!place.station_code ||
-    (place.type || "").toLowerCase().includes("rail")
-  );
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 function formatDistance(m) {
@@ -174,70 +170,73 @@ function formatDistance(m) {
   return (m / 1000).toFixed(1) + " km";
 }
 
-function minutesUntil(timeStr) {
-  if (!timeStr) return null;
+function minutesUntil(iso) {
+  if (!iso) return null;
   try {
-    let t;
-    if (timeStr.length <= 5) {
-      // HH:MM
-      const [h, m] = timeStr.split(":").map(Number);
-      t = new Date();
-      t.setHours(h, m, 0, 0);
-      if (t < new Date()) t.setDate(t.getDate() + 1);
-    } else {
-      t = new Date(timeStr);
-    }
-    const diff = Math.round((t - new Date()) / 60000);
-    return diff;
-  } catch {
-    return null;
-  }
+    const t = new Date(iso);
+    return Math.round((t - new Date()) / 60000);
+  } catch { return null; }
 }
 
-function formatTimeLabel(timeStr) {
-  const mins = minutesUntil(timeStr);
+function formatTimeLabel(iso) {
+  const mins = minutesUntil(iso);
   if (mins == null) return { mins: "—", clock: "" };
   if (mins <= 0) return { mins: "Due", clock: "" };
-  if (mins < 60) return { mins: mins + " min", clock: timeStr?.slice(0, 5) || "" };
-  return { mins: timeStr?.slice(0, 5) || "—", clock: "" };
+  if (mins < 60) {
+    const clock = new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return { mins: mins + " min", clock };
+  }
+  return {
+    mins: new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+    clock: ""
+  };
 }
 
-// ---------- Nearby stops ----------
-async function loadNearby(lat, lon, showStatus = true) {
-  if (!hasKeys()) {
-    statusEl.innerHTML = `<div class="error">Add your TransportAPI keys in config.js<br>
-      <a href="https://developer.transportapi.com/" target="_blank" style="color:#22d3ee">Get free keys</a></div>`;
-    return;
-  }
-
+// ---------- Stops from map bounds ----------
+async function loadFromMapBounds(showStatus = false) {
   if (isLoading) return;
   isLoading = true;
 
   if (showStatus) {
-    statusEl.innerHTML = `<span class="spinner"></span> Finding stops around you…`;
+    statusEl.innerHTML = `<span class="spinner"></span> Finding stops…`;
     statusEl.classList.remove("hidden");
   }
 
   try {
-    const url = apiUrl("/places.json", {
-      lat: lat.toFixed(5),
-      lon: lon.toFixed(5),
-      type: "bus_stop,train_station",
-      rpp: 25
-    });
+    const p = getBoundsParams();
+    const url = `https://bustimes.org/stops.json?ymin=${p.ymin}&ymax=${p.ymax}&xmin=${p.xmin}&xmax=${p.xmax}`;
     const data = await fetchJson(url);
-    const places = (data.member || []).sort(
-      (a, b) => (a.distance || 9999) - (b.distance || 9999)
-    );
+    const features = data.features || [];
+
+    const places = features.map(f => {
+      const [lon, lat] = f.geometry.coordinates;
+      const props = f.properties || {};
+      // URL is like /stops/010000002 → atcocode
+      const atco = (props.url || "").replace("/stops/", "") || null;
+      let dist = null;
+      if (currentLat != null) dist = haversine(currentLat, currentLon, lat, lon);
+      return {
+        name: props.name || "Bus stop",
+        atcocode: atco,
+        latitude: lat,
+        longitude: lon,
+        services: props.services || [],
+        indicator: props.indicator,
+        distance: dist
+      };
+    });
+
+    // Sort by distance if we have user location
+    places.sort((a, b) => (a.distance || 99999) - (b.distance || 99999));
 
     currentPlaces = places;
     clearStopMarkers();
-    places.forEach(addStopMarker);
-    renderStops(places);
+    places.slice(0, 80).forEach(addStopMarker); // don't overload the map
+    renderStops(places.slice(0, 40));
 
     nearbyCount.textContent = places.length;
     if (places.length === 0) {
-      statusEl.textContent = "No stops found here. Pan the map or try another area.";
+      statusEl.textContent = "No stops in this area. Zoom in or pan somewhere busier.";
       statusEl.classList.remove("hidden");
     } else {
       statusEl.classList.add("hidden");
@@ -253,21 +252,36 @@ async function loadNearby(lat, lon, showStatus = true) {
 
 function renderStops(places) {
   stopsList.innerHTML = "";
-  places.forEach((place) => {
-    const train = isTrainPlace(place);
+  places.forEach(place => {
+    const services = (place.services || []).slice(0, 4).join(", ");
     const card = document.createElement("div");
     card.className = "stop-card";
     card.innerHTML = `
-      <div class="stop-icon ${train ? "train" : "bus"}">${train ? "T" : "B"}</div>
+      <div class="stop-icon bus">B</div>
       <div class="stop-info">
-        <div class="name">${place.name || "Stop"}</div>
-        <div class="sub">${train ? "Train station" : "Bus stop"}${place.accuracy ? " · " + place.accuracy : ""}</div>
+        <div class="name">${place.name}</div>
+        <div class="sub">${services || "Bus stop"}${place.indicator ? " · " + place.indicator : ""}</div>
       </div>
       <div class="distance">${formatDistance(place.distance)}</div>
     `;
     card.addEventListener("click", () => showDepartures(place));
     stopsList.appendChild(card);
   });
+}
+
+// ---------- Live vehicles ----------
+async function loadVehicles() {
+  try {
+    const p = getBoundsParams();
+    const url = `https://bustimes.org/vehicles.json?ymin=${p.ymin}&ymax=${p.ymax}&xmin=${p.xmin}&xmax=${p.xmax}`;
+    const data = await fetchJson(url);
+    const list = Array.isArray(data) ? data : [];
+
+    clearVehicleMarkers();
+    list.slice(0, 120).forEach(addVehicleMarker);
+  } catch (err) {
+    console.warn("Vehicles load failed", err);
+  }
 }
 
 // ---------- Departures ----------
@@ -278,7 +292,7 @@ async function showDepartures(place) {
   departuresView.classList.remove("hidden");
 
   selectedStopName.textContent = place.name || "Departures";
-  selectedStopMeta.textContent = isTrainPlace(place) ? "Train station" : "Bus stop";
+  selectedStopMeta.textContent = (place.services || []).slice(0, 5).join(", ") || "Bus stop";
   updateFavButton(place);
 
   if (place.latitude && place.longitude) {
@@ -287,107 +301,53 @@ async function showDepartures(place) {
 
   departuresList.innerHTML = `<div class="status"><span class="spinner"></span> Loading live times…</div>`;
 
+  if (!place.atcocode) {
+    departuresList.innerHTML = `<div class="error">No stop code available.</div>`;
+    return;
+  }
+
   try {
-    if (isTrainPlace(place) && place.station_code) {
-      const url = apiUrl(`/train/station/${place.station_code}/live.json`, {
-        darwin: "true",
-        train_status: "passenger"
-      });
-      const data = await fetchJson(url);
-      renderTrainDepartures(data);
-    } else if (place.atcocode) {
-      const url = apiUrl(`/bus/stop/${place.atcocode}/live.json`, {
-        group: "route",
-        nextbuses: "yes"
-      });
-      const data = await fetchJson(url);
-      renderBusDepartures(data);
-    } else {
-      departuresList.innerHTML = `<div class="error">No live code available for this stop.</div>`;
-    }
+    const url = `https://bustimes.org/stops/${encodeURIComponent(place.atcocode)}/times.json`;
+    const data = await fetchJson(url);
+    renderDepartures(data.times || []);
   } catch (err) {
     console.error(err);
     departuresList.innerHTML = `<div class="error">Couldn’t load departures<br>${err.message}</div>`;
   }
 }
 
-function renderBusDepartures(data) {
-  const departures = data.departures || {};
-  const all = [];
-
-  Object.keys(departures).forEach((route) => {
-    (departures[route] || []).forEach((d) => {
-      all.push({
-        line: d.line || route,
-        dest: d.direction || d.destination_name || "",
-        expected: d.expected_departure_time || d.best_departure_estimate || d.aimed_departure_time,
-        aimed: d.aimed_departure_time,
-        status: d.status || ""
-      });
-    });
-  });
-
-  if (all.length === 0 && Array.isArray(data.departures)) {
-    data.departures.forEach((d) => all.push(d));
-  }
-
-  if (all.length === 0) {
-    departuresList.innerHTML = `<div class="status">No live departures right now.</div>`;
+function renderDepartures(times) {
+  if (!times.length) {
+    departuresList.innerHTML = `<div class="status">No departures right now.</div>`;
     return;
   }
 
-  all.sort((a, b) => (a.expected || "").localeCompare(b.expected || ""));
-
-  departuresList.innerHTML = "";
-  all.slice(0, 20).forEach((d) => {
-    const t = formatTimeLabel(d.expected);
-    const card = document.createElement("div");
-    card.className = "departure-card";
-    card.innerHTML = `
-      <div class="line-badge">${d.line || "?"}</div>
-      <div class="dest-block">
-        <div class="dest">${d.dest || "—"}</div>
-        ${d.status && d.status !== "On time" ? `<div class="extra">${d.status}</div>` : ""}
-      </div>
-      <div class="time-block">
-        <div class="mins">${t.mins}</div>
-        ${t.clock ? `<div class="clock">${t.clock}</div>` : ""}
-      </div>
-    `;
-    departuresList.appendChild(card);
+  // Prefer expected time, fall back to aimed
+  const sorted = [...times].sort((a, b) => {
+    const ta = a.expected_departure_time || a.aimed_departure_time || "";
+    const tb = b.expected_departure_time || b.aimed_departure_time || "";
+    return ta.localeCompare(tb);
   });
-}
-
-function renderTrainDepartures(data) {
-  const services = data.departures?.all || data.train_services || [];
-
-  if (!services.length) {
-    departuresList.innerHTML = `<div class="status">No trains currently listed.</div>`;
-    return;
-  }
 
   departuresList.innerHTML = "";
-  services.slice(0, 20).forEach((s) => {
-    const dest =
-      s.destination_name ||
-      (s.destination && s.destination[0]?.location_name) ||
-      "";
-    const expected = s.expected_departure_time || s.aimed_departure_time || s.std;
-    const t = formatTimeLabel(expected);
-    const platform = s.platform ? `Plat ${s.platform}` : "";
-    const status = s.status && s.status !== "ON TIME" ? s.status : "";
+  sorted.slice(0, 25).forEach(t => {
+    const line = t.service?.line_name || "?";
+    const dest = t.destination?.name || t.destination?.locality || "";
+    const expected = t.expected_departure_time || t.aimed_departure_time;
+    const label = formatTimeLabel(expected);
+    const live = !!t.expected_departure_time;
 
     const card = document.createElement("div");
     card.className = "departure-card";
     card.innerHTML = `
-      <div class="line-badge" style="background:#4ade80;color:#052e16;font-size:0.7rem">Train</div>
+      <div class="line-badge">${line}</div>
       <div class="dest-block">
         <div class="dest">${dest}</div>
-        <div class="extra">${[platform, status].filter(Boolean).join(" · ")}</div>
+        <div class="extra">${live ? "Live" : "Scheduled"}</div>
       </div>
       <div class="time-block">
-        <div class="mins">${t.mins}</div>
-        ${t.clock ? `<div class="clock">${t.clock}</div>` : ""}
+        <div class="mins">${label.mins}</div>
+        ${label.clock ? `<div class="clock">${label.clock}</div>` : ""}
       </div>
     `;
     departuresList.appendChild(card);
@@ -403,21 +363,20 @@ function showFavourites() {
   const favs = getFavourites();
   favouritesList.innerHTML = "";
 
-  if (favs.length === 0) {
+  if (!favs.length) {
     favEmpty.classList.remove("hidden");
     return;
   }
   favEmpty.classList.add("hidden");
 
-  favs.forEach((f) => {
-    const train = isTrainPlace(f);
+  favs.forEach(f => {
     const card = document.createElement("div");
     card.className = "stop-card";
     card.innerHTML = `
-      <div class="stop-icon ${train ? "train" : "bus"}">${train ? "T" : "B"}</div>
+      <div class="stop-icon bus">B</div>
       <div class="stop-info">
         <div class="name">${f.name}</div>
-        <div class="sub">${train ? "Train station" : "Bus stop"}</div>
+        <div class="sub">${(f.services || []).slice(0, 4).join(", ") || "Favourite"}</div>
       </div>
     `;
     card.addEventListener("click", () => showDepartures(f));
@@ -439,13 +398,17 @@ function locate() {
   favouritesView.classList.add("hidden");
 
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
+    pos => {
       const { latitude, longitude } = pos.coords;
       setUserLocation(latitude, longitude);
-      loadNearby(latitude, longitude, true);
+      loadFromMapBounds(true);
+      loadVehicles();
+      // Refresh vehicles every 20s while on the map
+      clearInterval(vehicleTimer);
+      vehicleTimer = setInterval(loadVehicles, 20000);
     },
-    (err) => {
-      statusEl.innerHTML = `<div class="error">Location error: ${err.message}<br>Allow location access and try again.</div>`;
+    err => {
+      statusEl.innerHTML = `<div class="error">Location error: ${err.message}<br>Allow location and try again.</div>`;
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 20000 }
   );
@@ -469,9 +432,7 @@ $("toggleFavBtn").addEventListener("click", () => {
 
 // ---------- Init ----------
 initMap();
-
-// Auto-locate on load
-setTimeout(locate, 400);
+setTimeout(locate, 300);
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
