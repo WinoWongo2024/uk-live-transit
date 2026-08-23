@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a0a2e" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="Live UK train and bus departures near you" />
+  <meta name="description" content="Live UK bus departures near you" />
   <title>UK Live Transit</title>
 
   <link rel="manifest" href="manifest.json" />
@@ -14,23 +14,24 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Full-screen map -->
   <div id="map"></div>
 
-  <!-- Top bar -->
   <div class="top-bar">
-    <div class="brand">UK Live Transit</div>
+    <div class="search-wrap">
+      <input id="searchInput" type="search" placeholder="Search stop or place…" autocomplete="off" enterkeyhint="search" />
+      <button id="searchClear" class="search-clear hidden" type="button">×</button>
+    </div>
     <div class="top-actions">
       <button id="favBtn" class="icon-btn" title="Favourites">★</button>
       <button id="locateBtn" class="icon-btn primary" title="My location">◎</button>
     </div>
   </div>
 
-  <!-- Bottom sheet -->
+  <div id="searchResults" class="search-results hidden"></div>
+
   <div id="sheet" class="sheet">
     <div class="sheet-handle"></div>
 
-    <!-- Nearby view -->
     <div id="nearbyView">
       <div class="sheet-header">
         <h2>Nearby</h2>
@@ -40,7 +41,6 @@
       <div id="stopsList" class="card-list"></div>
     </div>
 
-    <!-- Departures view -->
     <div id="departuresView" class="hidden">
       <div class="sheet-header">
         <button id="backBtn" class="back-btn">←</button>
@@ -53,7 +53,6 @@
       <div id="departuresList" class="card-list"></div>
     </div>
 
-    <!-- Favourites view -->
     <div id="favouritesView" class="hidden">
       <div class="sheet-header">
         <button id="favBackBtn" class="back-btn">←</button>
