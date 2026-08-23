@@ -1,86 +1,61 @@
 # UK Live Transit
 
-**Location-based live UK train & bus departures**  
-A mobile-first Progressive Web App (PWA) for personal use across the UK (Leeds, London, Somerset, Harrogate, Bath, and everywhere else).
+**Map-first live UK train & bus departures**  
+Inspired by the First Bus app experience. Works across the whole of Great Britain (Leeds, London, Somerset, Harrogate, Bath…).
 
-Hosted on GitHub Pages – installable on your phone home screen.
+Live demo (after you enable Pages):  
+**https://winowongo2024.github.io/uk-live-transit/**
+
+## What’s new
+
+- Full-screen dark map (Carto dark tiles)
+- Bottom sheet with nearby stops
+- **Pan / zoom the map** → stops update automatically
+- Live departure boards with “X min” countdown style
+- **Favourites** (saved on your phone via localStorage)
+- Cleaner, more modern mobile UI
 
 ## Features
-- Uses your current location
-- Shows nearby bus stops and train stations
-- Live departure boards for buses and trains
-- Clean mobile UI with interactive map
-- Works offline for the app shell (PWA)
 
-## Quick Start
+| Feature | Status |
+|---------|--------|
+| Your location | ✅ |
+| Nearby bus stops + train stations | ✅ |
+| Live departures | ✅ |
+| Map updates when you pan | ✅ |
+| Favourites | ✅ (local) |
+| Real-time bus vehicle dots | 🔜 (needs BODS key + extra work) |
+| Account / cloud sync | 🔜 (possible with free Firebase later) |
 
-### 1. Get a free API key (recommended)
+## Setup
 
-**Best single key for this app:** [TransportAPI](https://developer.transportapi.com/)
-- Sign up → Free plan (30 requests per day forever)
-- Covers nearby places + live bus **and** train departures across Great Britain
+1. Your TransportAPI keys are already in `config.js`.
+2. Enable **GitHub Pages**:
+   - Settings → Pages → Source: `main` branch → `/ (root)`
+3. Open the Pages URL on your phone → **Add to Home Screen**.
 
-Optional extras later:
-- [Bus Open Data Service (BODS)](https://data.bus-data.dft.gov.uk/) – richer bus vehicle locations
-- National Rail Darwin token via [Rail Data Marketplace](https://raildata.org.uk/)
+## How to use
 
-### 2. Add your keys
+1. Allow location when asked (or tap the ◎ button).
+2. Nearby stops appear in the bottom sheet and as dots on the map.
+3. **Drag the map** – stops refresh for the new area.
+4. Tap a stop → live departure board.
+5. Tap ☆ to save as favourite. Access favourites with the ★ button.
 
-Edit `config.js`:
+## Limits (honest)
 
-```js
-const CONFIG = {
-  TRANSPORTAPI_APP_ID: "your_app_id_here",
-  TRANSPORTAPI_APP_KEY: "your_app_key_here"
-};
-```
+- TransportAPI free tier = **30 requests/day**.  
+  Panning the map uses requests, so don’t spam it all day.
+- Live bus *vehicle* tracking (moving bus icons) needs the free BODS API + a bit more code. We can add it next.
+- No real login yet – favourites stay on the device. Cloud sync can be added later with a free Firebase project if you want.
 
-### 3. Enable GitHub Pages
+## Next possible upgrades
 
-1. Go to the repository **Settings → Pages**
-2. Source: Deploy from a branch → `main` → `/ (root)`
-3. Save
-4. Your live app will appear at:  
-   **https://winowongo2024.github.io/uk-live-transit/**
-
-### 4. Install on phone
-
-Open the URL on your phone → browser menu → **Add to Home Screen**.
-
-## How it works
-
-1. Browser asks for your location
-2. TransportAPI finds nearby bus stops and train stations
-3. Tap any stop/station to see live departures
-4. Map shows your position and the selected stop
-
-## Limitations (honest)
-
-- Free TransportAPI tier = **30 requests/day**. Perfect for personal use if you don’t spam refresh.
-- Real-time quality depends on operators feeding data into the national systems.
-- Coverage is excellent in cities, thinner in very rural areas.
-
-## Project structure
-
-```
-index.html      – main page
-style.css       – mobile-first styles
-app.js          – all logic
-config.js       – your API keys (edit this)
-manifest.json   – PWA install info
-sw.js           – basic service worker
-```
-
-## Future ideas
-
-- Favourites / recent stops
-- BODS live vehicle dots on the map
+- Live bus positions on the map (BODS)
 - Simple journey planner
-- Dark mode
-- Better offline caching for your frequent areas
+- Cloud favourites + optional login
+- Service alerts
 
 ## Licence
 
-MIT – free to use and modify.
-
-Made for real UK travel.
+MIT
