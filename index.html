@@ -2,48 +2,69 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0f172a" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a0a2e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="description" content="Live UK train and bus departures near you" />
   <title>UK Live Transit</title>
 
-  <!-- PWA -->
   <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icon-192.png" />
-
-  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>UK Live Transit</h1>
-    <button id="locateBtn" class="primary">📍 Near Me</button>
-  </header>
+  <!-- Full-screen map -->
+  <div id="map"></div>
 
-  <main>
-    <div id="status" class="status">Tap “Near Me” to find stops around you</div>
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="brand">UK Live Transit</div>
+    <div class="top-actions">
+      <button id="favBtn" class="icon-btn" title="Favourites">★</button>
+      <button id="locateBtn" class="icon-btn primary" title="My location">◎</button>
+    </div>
+  </div>
 
-    <div id="map" class="map"></div>
+  <!-- Bottom sheet -->
+  <div id="sheet" class="sheet">
+    <div class="sheet-handle"></div>
 
-    <section id="stopsSection" class="hidden">
-      <h2>Nearby stops</h2>
-      <div id="stopsList" class="stops-list"></div>
-    </section>
-
-    <section id="departuresSection" class="hidden">
-      <div class="departures-header">
-        <button id="backBtn" class="secondary">← Back</button>
-        <h2 id="selectedStopName">Departures</h2>
+    <!-- Nearby view -->
+    <div id="nearbyView">
+      <div class="sheet-header">
+        <h2>Nearby</h2>
+        <span id="nearbyCount" class="badge">—</span>
       </div>
-      <div id="departuresList" class="departures-list"></div>
-    </section>
-  </main>
+      <div id="status" class="status">Finding stops…</div>
+      <div id="stopsList" class="card-list"></div>
+    </div>
 
-  <footer>
-    <small>Data via TransportAPI • Free personal use</small>
-  </footer>
+    <!-- Departures view -->
+    <div id="departuresView" class="hidden">
+      <div class="sheet-header">
+        <button id="backBtn" class="back-btn">←</button>
+        <div class="sheet-title-wrap">
+          <h2 id="selectedStopName">Departures</h2>
+          <div id="selectedStopMeta" class="meta"></div>
+        </div>
+        <button id="toggleFavBtn" class="icon-btn" title="Save favourite">☆</button>
+      </div>
+      <div id="departuresList" class="card-list"></div>
+    </div>
+
+    <!-- Favourites view -->
+    <div id="favouritesView" class="hidden">
+      <div class="sheet-header">
+        <button id="favBackBtn" class="back-btn">←</button>
+        <h2>Favourites</h2>
+      </div>
+      <div id="favouritesList" class="card-list"></div>
+      <div id="favEmpty" class="empty-state hidden">
+        No favourites yet.<br>Tap ☆ on a stop to save it.
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="config.js"></script>
